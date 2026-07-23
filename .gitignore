@@ -1,0 +1,16 @@
+.states
+artifacts
+node_modules
+cache
+typechain-types
+.env
+coverage
+coverage.json
+gas-report.txt
+tron-nile.mnemonic
+artifacts-tron
+cache-tron
+deploy
+scripts.md
+deployments
+.vscode
