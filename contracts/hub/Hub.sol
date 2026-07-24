@@ -6,6 +6,7 @@ import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import {ERC20Burnable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 
 import {IToken} from "./IToken.sol";
+import {IReward} from "./IReward.sol";
 
 contract Hub {
     Config public config;
@@ -18,6 +19,10 @@ contract Hub {
     event Minted(address indexed from, uint256 bonded, uint256 minted);
     event Burned(address indexed from, uint256 burntAmount, uint256 unbondedAmount);
     event FinishBurn(address indexed from, uint256 amount);
+    event GlobalIndexUpdated();
+    event ValidatorDeregistered(address indexed validator);
+    event ParamsUpdated();
+    event ConfigUpdated();
 
     struct Config {
         address owner;
@@ -46,7 +51,8 @@ contract Hub {
         currentBatch.id = 1;
         currentBatch.requestedWithFee = 0;
 
-        // registerValidator(validator);
+        validatorWhitelist[validator] = true;
+        whiteListCount = 1;
         freezebalancev2(msg.value, 1);
         address[] memory srList = new address[](1);
         srList[0] = validator;
@@ -141,6 +147,63 @@ contract Hub {
         emit FinishBurn(address(this), payout);
     }
 
+    function updateGlobalIndex() public {
+        require(config.rewardContract != address(0), "");
+
+        state.lastIndexModification = block.timestamp;
+
+        uint256 reward = withdrawreward();
+        (bool success, ) = (config.rewardContract).call{value: reward}("");
+        require(success, "trx transfer reverted");
+        IReward(config.rewardContract).swapToRewardToken();
+        IReward(config.rewardContract).updateGlobalIndex();
+
+        emit GlobalIndexUpdated();
+    }
+
+    function registerValidator(address validator) external {
+        require(msg.sender == config.owner, "");
+        require(isSrCandidate(validator), "");
+
+        validatorWhitelist[validator] = true;
+        whiteListCount += 1;
+
+        emit ValidatorRegistered(validator);
+    }
+
+    function deregisterValidator(address validator) external {
+        require(msg.sender == config.owner, "");
+        require(validatorWhitelist[validator] == true, "");
+        require(whiteListCount > 1, "");
+
+        validatorWhitelist[validator] = false;
+        whiteListCount -= 1;
+
+        emit ValidatorDeregistered(validator);
+    }
+
+    function updateParams(uint256 _epochPeriod, uint256 _unbondingPeriod, uint256 _pegRecoveryFee,
+    uint256 _erThreshold) external {
+        require(msg.sender == config.owner, "");
+
+        parameters.epochPeriod = _epochPeriod;
+        parameters.unbondingPeriod = _unbondingPeriod;
+        parameters.pegRecoveryFee = _pegRecoveryFee;
+        parameters.erThreshold = _erThreshold;
+
+        emit ParamsUpdated();
+    }
+
+    function updateConfig(address _owner, address _rewardContract, address _tokenContract) external {
+        require(msg.sender == config.owner, "");
+
+        config.owner = _owner;
+        config.rewardContract = _rewardContract;
+        config.tokenContract = _tokenContract;
+
+        emit ConfigUpdated();
+    }
+
     struct Parameters {
         uint256 epochPeriod; // recommended 2 days
         uint256 unbondingPeriod; // 14 days
@@ -165,6 +228,7 @@ contract Hub {
     }
 
     mapping(address => bool) public validatorWhitelist;
+    uint256 public whiteListCount;
 
     mapping(address => mapping(uint64 => uint256)) public unbondWaitList;
 

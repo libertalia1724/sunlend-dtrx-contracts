@@ -54,4 +54,6 @@ contract Reward {
         h.pendingRewards = remainder;
         IERC20(config.RewardToken).transfer(recipient, payoutAmount);
     }
+
+    receive() external payable {}
 }
