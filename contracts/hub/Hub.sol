@@ -2,6 +2,10 @@
 pragma solidity 0.8.24;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {IERC20} from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
+import {ERC20Burnable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
+
+import {IToken} from "./IToken.sol";
 
 contract Hub {
     Config public config;
@@ -9,7 +13,11 @@ contract Hub {
     State public state;
     CurrentBatch public currentBatch;
 
-    bool public initialized;
+    event ValidatorRegistered(address indexed validator);
+    event Bonded(uint256 amount);
+    event Minted(address indexed from, uint256 bonded, uint256 minted);
+    event Burned(address indexed from, uint256 burntAmount, uint256 unbondedAmount);
+    event FinishBurn(address indexed from, uint256 amount);
 
     struct Config {
         address owner;
@@ -17,17 +25,119 @@ contract Hub {
         address tokenContract;
     }
 
-    constructor() {
+    constructor(uint256 _epochPeriod, uint256 _unbondingPeriod, uint256 _pegRecoveryFee, uint256 _erThreshold,
+    address _rewardToken, address validator) payable {
+        require(msg.value > 0, "");
+
         config.owner = msg.sender;
+        state.exchangeRate = 1e18;
+        state.totalBondAmount = msg.value;
+        state.lastIndexModification = block.timestamp;
+        state.lastUnbondedTime = block.timestamp;
+        state.lastProcessedBatch = 0;
+        state.actualUnbondedAmount = 0;
+
+        parameters.epochPeriod = _epochPeriod;
+        parameters.unbondingPeriod = _unbondingPeriod;
+        parameters.pegRecoveryFee = _pegRecoveryFee;
+        parameters.erThreshold = _erThreshold;
+        parameters.rewardToken = _rewardToken;
+
+        currentBatch.id = 1;
+        currentBatch.requestedWithFee = 0;
+
+        // registerValidator(validator);
+        freezebalancev2(msg.value, 1);
+        address[] memory srList = new address[](1);
+        srList[0] = validator;
+        uint256[] memory tpList = new uint256[](1);
+        tpList[0] = msg.value;
+        vote(srList, tpList);
+
+        emit ValidatorRegistered(validator);
+        emit Bonded(msg.value);
     }
 
-    function initialize(address _rewardContract, address _tokenContract) public {
-        require(initialized == false, "contract already initialized");
-        require(config.owner == msg.sender, "unauthorized access");
-        initialized = true;
+    function bond(address validator) payable external {
+        require(validatorWhitelist[validator] == true, "");
+        require(msg.value > 0, "");
 
-        config.rewardContract = _rewardContract;
-        config.tokenContract = _tokenContract;
+        uint256 totalIssued;
+        if (config.tokenContract != address(0)) {
+            totalIssued = IERC20(config.tokenContract).totalSupply();
+        } else {
+            totalIssued = 0;
+        }
+
+        uint256 mintAmount = Math.mulDiv(msg.value, state.exchangeRate, 1e18);
+        uint256 deficit = (totalIssued + mintAmount + currentBatch.requestedWithFee) - (state.totalBondAmount - msg.value);
+        uint256 fee = pegRecoveryFee(mintAmount, deficit);
+        uint256 mintAmountWithFee = mintAmount - fee;
+        totalIssued += mintAmountWithFee;
+        state.totalBondAmount += msg.value;
+        recomputeExchangeRate(totalIssued, currentBatch.requestedWithFee);
+
+        freezebalancev2(msg.value, 1);
+        address[] memory srList = new address[](1);
+        srList[0] = validator;
+        uint256[] memory tpList = new uint256[](1);
+        tpList[0] = msg.value;
+        vote(srList, tpList);
+
+        IToken(config.tokenContract).mint(msg.sender, mintAmountWithFee);
+        
+        emit Minted(msg.sender, msg.value, mintAmountWithFee);
+    }
+
+    function executeUnbond(uint256 amount, address onBehalfOf) internal {
+        require(amount > 0, "");
+
+        uint256 totalIssued = IERC20(config.tokenContract).totalSupply();
+        uint256 deficit = (totalIssued + currentBatch.requestedWithFee) - state.totalBondAmount;
+        uint256 fee = pegRecoveryFee(amount, deficit);
+        uint256 amountWithFee = amount - fee;
+        currentBatch.requestedWithFee += amountWithFee;
+        _recordUnbondEntry(onBehalfOf, currentBatch.id, amountWithFee);
+        totalIssued -= amount;
+        recomputeExchangeRate(totalIssued, currentBatch.requestedWithFee);
+
+        if ((block.timestamp - state.lastUnbondedTime) > parameters.epochPeriod) {
+            uint256 unbondAmount = Math.mulDiv(currentBatch.requestedWithFee, state.exchangeRate, 1e18);
+            state.totalBondAmount -= unbondAmount;
+            unbondHistory[currentBatch.id].batchId = currentBatch.id;
+            unbondHistory[currentBatch.id].time = block.timestamp;
+            unbondHistory[currentBatch.id].amount = currentBatch.requestedWithFee;
+            unbondHistory[currentBatch.id].appliedExchangeRate = state.exchangeRate;
+            unbondHistory[currentBatch.id].withdrawRate = state.exchangeRate;
+            unbondHistory[currentBatch.id].released = false;
+
+            currentBatch.id += 1;
+            currentBatch.requestedWithFee = 0;
+            state.lastUnbondedTime = block.timestamp;
+
+            unfreezebalancev2(unbondAmount, 1);
+            ERC20Burnable(config.tokenContract).burnFrom(onBehalfOf, amount);
+
+            emit Burned(onBehalfOf, amount, amountWithFee);
+        }
+    }
+
+    function unbond(uint256 amount) external {
+        executeUnbond(amount, msg.sender);
+    }
+
+    function withdrawUnbonded() external {
+        uint256 hubBalance = address(this).balance;
+        processWithdrawRate(block.timestamp - parameters.unbondingPeriod, hubBalance);
+        uint256 payout = withdrawableAmount(msg.sender, block.timestamp - parameters.unbondingPeriod);
+        require(payout > 0);
+        _clearReleasedEntries(msg.sender);
+        state.prevHubBalance = hubBalance - payout;
+
+        (bool success, ) = (msg.sender).call{value: payout}("");
+        require(success, "trx transfer reverted");
+
+        emit FinishBurn(address(this), payout);
     }
 
     struct Parameters {
@@ -143,6 +253,23 @@ contract Hub {
             userBatchIds[user].push(batchId);
         }
         unbondWaitList[user][batchId] += amount;
+    }
+
+    function _clearReleasedEntries(address user) internal {
+        uint64[] storage batchIds = userBatchIds[user];
+        uint256 i = 0;
+
+        while (i < batchIds.length) {
+            uint64 batchId = batchIds[i];
+
+            if (unbondHistory[batchId].released) {
+                unbondWaitList[user][batchId] = 0;
+                batchIds[i] = batchIds[batchIds.length - 1];
+                batchIds.pop();
+            } else {
+                i++;
+            }
+        }
     }
 
     function withdrawableAmount(address user, uint256 asOf) public view returns(uint256) {
