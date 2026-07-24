@@ -69,8 +69,9 @@ contract Hub {
             totalIssued = 0;
         }
 
-        uint256 mintAmount = Math.mulDiv(msg.value, state.exchangeRate, 1e18);
-        uint256 deficit = (totalIssued + mintAmount + currentBatch.requestedWithFee) - (state.totalBondAmount - msg.value);
+        uint256 mintAmount = Math.mulDiv(msg.value, 1e18, state.exchangeRate);
+        int256 deficit = int256(totalIssued + mintAmount + currentBatch.requestedWithFee) -
+        int256(state.totalBondAmount + msg.value);
         uint256 fee = pegRecoveryFee(mintAmount, deficit);
         uint256 mintAmountWithFee = mintAmount - fee;
         totalIssued += mintAmountWithFee;
@@ -93,7 +94,7 @@ contract Hub {
         require(amount > 0, "");
 
         uint256 totalIssued = IERC20(config.tokenContract).totalSupply();
-        uint256 deficit = (totalIssued + currentBatch.requestedWithFee) - state.totalBondAmount;
+        int256 deficit = int256(totalIssued + currentBatch.requestedWithFee) - int256(state.totalBondAmount);
         uint256 fee = pegRecoveryFee(amount, deficit);
         uint256 amountWithFee = amount - fee;
         currentBatch.requestedWithFee += amountWithFee;
@@ -116,10 +117,10 @@ contract Hub {
             state.lastUnbondedTime = block.timestamp;
 
             unfreezebalancev2(unbondAmount, 1);
-            ERC20Burnable(config.tokenContract).burnFrom(onBehalfOf, amount);
-
-            emit Burned(onBehalfOf, amount, amountWithFee);
         }
+        ERC20Burnable(config.tokenContract).burnFrom(onBehalfOf, amount);
+
+        emit Burned(onBehalfOf, amount, amountWithFee);
     }
 
     function unbond(uint256 amount) external {
@@ -188,13 +189,16 @@ contract Hub {
         }
     }
 
-    function pegRecoveryFee(uint256 requestedAmount, uint256 deficit) internal view returns(uint256) {
+    function pegRecoveryFee(uint256 requestedAmount, int256 deficit) internal view returns(uint256) {
         if (state.exchangeRate >= parameters.erThreshold) {
+            return 0;
+        }
+        if (deficit <= 0) {
             return 0;
         }
 
         uint256 maxFee = Math.mulDiv(requestedAmount, parameters.pegRecoveryFee, 1e18);
-        uint256 actualFee = Math.min(maxFee, deficit);
+        uint256 actualFee = Math.min(maxFee, uint256(deficit));
         return actualFee;
     }
 

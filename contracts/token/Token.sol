@@ -43,4 +43,8 @@ contract Token is ERC20Burnable {
             IReward(rewardContract).increaseBalance(to, value);
         }
     }
+
+    function decimals() public pure override returns(uint8) {
+        return 6;
+    }
 }

@@ -31,14 +31,14 @@ contract Reward {
         uint256 liveBalance = IERC20(config.RewardToken).balanceOf(address(this));
         uint256 claimed = liveBalance - state.prevRewardBalance;
         state.prevRewardBalance = liveBalance;
-        if (state.totalBalance == 0) return;
+        require(state.totalBalance != 0, "");
         state.globalIndex += Math.mulDiv(claimed, 1e18, state.totalBalance);
     }
 
     // return value is decimal
     function settleHolder(address account) internal returns(uint256) {
         Holder storage h = holder[account];
-        uint256 accrued = Math.mulDiv((state.globalIndex - h.index), h.balance, 1e18);
+        uint256 accrued = (state.globalIndex - h.index) * h.balance;
         h.pendingRewards += accrued;
         h.index = state.globalIndex;
         return accrued;
