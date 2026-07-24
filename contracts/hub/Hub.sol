@@ -135,4 +135,31 @@ contract Hub {
 
         state.actualUnbondedAmount = 0;
     }
+
+    mapping(address => uint64[]) public userBatchIds;
+
+    function _recordUnbondEntry(address user, uint64 batchId, uint256 amount) internal {
+        if (unbondWaitList[user][batchId] == 0) {
+            userBatchIds[user].push(batchId);
+        }
+        unbondWaitList[user][batchId] += amount;
+    }
+
+    function withdrawableAmount(address user, uint256 asOf) public view returns(uint256) {
+        uint256 total = 0;
+        uint64[] storage batchIds = userBatchIds[user];
+
+        for (uint256 i = 0; i < batchIds.length; i++) {
+            uint64 batchId = batchIds[i];
+            uint256 amt = unbondWaitList[user][batchId];
+            if (amt == 0) continue;
+
+            UnbondHistory storage h = unbondHistory[batchId];
+
+            if (h.released || h.time < asOf) {
+                total += Math.mulDiv(amt, h.withdrawRate, 1e18);
+            }
+        }
+        return total;
+    }
 }
