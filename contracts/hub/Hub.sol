@@ -357,4 +357,6 @@ contract Hub {
         }
         return total;
     }
+
+    receive() external payable {}
 }
