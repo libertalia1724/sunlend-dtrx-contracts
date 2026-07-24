@@ -16,6 +16,7 @@ contract Token is ERC20Burnable {
 
     function mint(address recipient, uint256 amount) external {
         require(msg.sender == minter, "unauthorized access");
+        require(rewardContract != address(0), "reward contract not setted");
         _mint(recipient, amount);
     }
 
@@ -32,6 +33,7 @@ contract Token is ERC20Burnable {
     }
 
     function _update(address from, address to, uint256 value) internal override {
+        require(rewardContract != address(0), "reward contract not setted");
         super._update(from, to, value);
 
         if (from != address(0)) {

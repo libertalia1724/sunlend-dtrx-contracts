@@ -43,7 +43,7 @@ contract Hub {
         uint256 totalBondAmount;
         uint256 lastIndexModification;
         uint256 prevHubBalance;
-        uint256 actualUnbondedAmount;
+        int256 actualUnbondedAmount;
         uint256 lastUnbondedTime;
         uint64 lastProcessedBatch;
     }
@@ -72,7 +72,7 @@ contract Hub {
         uint256 actualSupply = newTotalIssued + requestedWithFee;
 
         if (state.totalBondAmount == 0 || actualSupply == 0) {
-            state.exchangeRate = 1;
+            state.exchangeRate = 1e18;
         } else {
             state.exchangeRate = (state.totalBondAmount * 1e18) / actualSupply;
         }
@@ -86,5 +86,53 @@ contract Hub {
         uint256 maxFee = Math.mulDiv(requestedAmount, parameters.pegRecoveryFee, 1e18);
         uint256 actualFee = Math.min(maxFee, deficit);
         return actualFee;
+    }
+
+    function processWithdrawRate(uint256 historicalTime, uint256 hubBalance) internal {
+        int256 balanceDelta = int256(hubBalance) - int256(state.prevHubBalance);
+        state.actualUnbondedAmount += balanceDelta;
+
+        uint256 totalExpected = 0;
+        uint256 batchCount = 0;
+        uint64 i = state.lastProcessedBatch + 1;
+
+        while (true) {
+            UnbondHistory storage h = unbondHistory[i];
+            if (h.time == 0) break;
+            if (h.time > historicalTime) break;
+            if (h.released) break;
+
+            totalExpected += Math.mulDiv(h.amount, h.withdrawRate, 1e18);
+            batchCount += 1;
+            i += 1;
+        }
+
+        if (batchCount >= 1) {
+            require(totalExpected > 0, "unexpected zero totalExpected");
+
+            int256 shortfall = int256(totalExpected) - state.actualUnbondedAmount;
+
+            uint64 j = state.lastProcessedBatch + 1;
+            while (true) {
+                UnbondHistory storage h = unbondHistory[j];
+                if (h.time == 0) break;
+                if (h.time > historicalTime) break;
+                if (h.released) break;
+
+                uint256 expected = Math.mulDiv(h.amount, h.withdrawRate, 1e18);
+                uint256 weight = Math.mulDiv(expected, 1e18, totalExpected);
+
+                int256 shortfallI = (shortfall * int256(weight)) / int256(1e18);
+                int256 actualI = int256(expected) - shortfallI;
+                require(actualI >= 0, "negative payout computed");
+
+                h.withdrawRate = Math.mulDiv(uint256(actualI), 1e18, h.amount);
+                h.released = true;
+                state.lastProcessedBatch = j;
+                j += 1;
+            }
+        }
+
+        state.actualUnbondedAmount = 0;
     }
 }
