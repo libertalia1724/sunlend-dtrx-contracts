@@ -133,6 +133,11 @@ contract Hub {
             state.lastUnfrozenTime = block.timestamp;
 
             unfreezebalancev2(unfreezeAmount, 1);
+
+            uint256 len = srList.length;
+            for (uint256 i = 0; i < len; i++) {
+                tpList[i] = voteCount(address(this), srList[i]);
+            }
         }
         ERC20Burnable(config.tokenContract).burnFrom(onBehalfOf, amount);
 
@@ -176,6 +181,7 @@ contract Hub {
         require(msg.sender == config.owner, "");
         require(!validatorWhitelist[validator], "");
         require(isSrCandidate(validator), "");
+        require(srList.length < 30, "");
 
         validatorWhitelist[validator] = true;
         whiteListCount += 1;
@@ -193,13 +199,27 @@ contract Hub {
 
         validatorWhitelist[validator] = false;
         whiteListCount -= 1;
+
+        uint256 validatorTp = tpList[validatorIndex];
         srList[validatorIndex] = srList[srList.length - 1];
         srList.pop();
-        uint256 validatorTp = tpList[validatorIndex];
         tpList[validatorIndex] = tpList[tpList.length - 1];
         tpList.pop();
-        // TODO: it is a placeholder dangerious fix this
-        tpList[0] += validatorTp;
+
+        uint256 remainingTotal = 0;
+        for (uint256 i = 0; i < tpList.length; i++) {
+            remainingTotal += tpList[i];
+        }
+        require(remainingTotal > 0, "");
+
+        uint256 distributed = 0;
+        for (uint256 i = 0; i < tpList.length - 1; i++) {
+            uint256 share = Math.mulDiv(validatorTp, tpList[i], remainingTotal);
+            tpList[i] += share;
+            distributed += share;
+        }
+        tpList[tpList.length - 1] += (validatorTp - distributed);
+
         vote(srList, tpList);
 
         emit ValidatorDeregistered(validator);
