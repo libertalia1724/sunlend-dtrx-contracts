@@ -10,7 +10,7 @@ contract Token is ERC20Burnable {
     address public minter;
     address public rewardContract;
 
-    constructor() ERC20('dTRX', 'dTRX') {
+    constructor() ERC20('fTRX', 'fTRX') {
         owner = msg.sender;
     }
 

@@ -15,9 +15,9 @@ contract Hub {
     CurrentBatch public currentBatch;
 
     event ValidatorRegistered(address indexed validator);
-    event Bonded(uint256 amount);
-    event Minted(address indexed from, uint256 bonded, uint256 minted);
-    event Burned(address indexed from, uint256 burntAmount, uint256 unbondedAmount);
+    event Frozen(uint256 amount);
+    event Minted(address indexed from, uint256 frozen, uint256 minted);
+    event Burned(address indexed from, uint256 burntAmount, uint256 frozenAmount);
     event FinishBurn(address indexed from, uint256 amount);
     event GlobalIndexUpdated();
     event ValidatorDeregistered(address indexed validator);
@@ -30,21 +30,21 @@ contract Hub {
         address tokenContract;
     }
 
-    constructor(uint256 _epochPeriod, uint256 _unbondingPeriod, uint256 _pegRecoveryFee, uint256 _erThreshold,
+    constructor(uint256 _epochPeriod, uint256 _unfreezingPeriod, uint256 __pegRecoveryFee, uint256 _erThreshold,
     address _rewardToken, address validator) payable {
         require(msg.value > 0, "");
 
         config.owner = msg.sender;
         state.exchangeRate = 1e18;
-        state.totalBondAmount = msg.value;
+        state.totalFreezeAmount = msg.value;
         state.lastIndexModification = block.timestamp;
-        state.lastUnbondedTime = block.timestamp;
+        state.lastUnfrozenTime = block.timestamp;
         state.lastProcessedBatch = 0;
-        state.actualUnbondedAmount = 0;
+        state.actualUnfrozenAmount = 0;
 
         parameters.epochPeriod = _epochPeriod;
-        parameters.unbondingPeriod = _unbondingPeriod;
-        parameters.pegRecoveryFee = _pegRecoveryFee;
+        parameters.unfrozenPeriod = _unfreezingPeriod;
+        parameters.pegRecoveryFee = __pegRecoveryFee;
         parameters.erThreshold = _erThreshold;
         parameters.rewardToken = _rewardToken;
 
@@ -61,10 +61,10 @@ contract Hub {
         vote(srList, tpList);
 
         emit ValidatorRegistered(validator);
-        emit Bonded(msg.value);
+        emit Frozen(msg.value);
     }
 
-    function bond(address validator) payable external {
+    function freeze_(address validator) payable external {
         require(validatorWhitelist[validator] == true, "");
         require(msg.value > 0, "");
 
@@ -77,12 +77,12 @@ contract Hub {
 
         uint256 mintAmount = Math.mulDiv(msg.value, 1e18, state.exchangeRate);
         int256 deficit = int256(totalIssued + mintAmount + currentBatch.requestedWithFee) -
-        int256(state.totalBondAmount + msg.value);
-        uint256 fee = pegRecoveryFee(mintAmount, deficit);
+        int256(state.totalFreezeAmount + msg.value);
+        uint256 fee = _pegRecoveryFee(mintAmount, deficit);
         uint256 mintAmountWithFee = mintAmount - fee;
         totalIssued += mintAmountWithFee;
-        state.totalBondAmount += msg.value;
-        recomputeExchangeRate(totalIssued, currentBatch.requestedWithFee);
+        state.totalFreezeAmount += msg.value;
+        _recomputeExchangeRate(totalIssued, currentBatch.requestedWithFee);
 
         freezebalancev2(msg.value, 1);
         address[] memory srList = new address[](1);
@@ -96,47 +96,47 @@ contract Hub {
         emit Minted(msg.sender, msg.value, mintAmountWithFee);
     }
 
-    function executeUnbond(uint256 amount, address onBehalfOf) internal {
+    function _executeUnfreeze(uint256 amount, address onBehalfOf) internal {
         require(amount > 0, "");
 
         uint256 totalIssued = IERC20(config.tokenContract).totalSupply();
-        int256 deficit = int256(totalIssued + currentBatch.requestedWithFee) - int256(state.totalBondAmount);
-        uint256 fee = pegRecoveryFee(amount, deficit);
+        int256 deficit = int256(totalIssued + currentBatch.requestedWithFee) - int256(state.totalFreezeAmount);
+        uint256 fee = _pegRecoveryFee(amount, deficit);
         uint256 amountWithFee = amount - fee;
         currentBatch.requestedWithFee += amountWithFee;
-        _recordUnbondEntry(onBehalfOf, currentBatch.id, amountWithFee);
+        _recordUnfreezeEntry(onBehalfOf, currentBatch.id, amountWithFee);
         totalIssued -= amount;
-        recomputeExchangeRate(totalIssued, currentBatch.requestedWithFee);
+        _recomputeExchangeRate(totalIssued, currentBatch.requestedWithFee);
 
-        if ((block.timestamp - state.lastUnbondedTime) > parameters.epochPeriod) {
-            uint256 unbondAmount = Math.mulDiv(currentBatch.requestedWithFee, state.exchangeRate, 1e18);
-            state.totalBondAmount -= unbondAmount;
-            unbondHistory[currentBatch.id].batchId = currentBatch.id;
-            unbondHistory[currentBatch.id].time = block.timestamp;
-            unbondHistory[currentBatch.id].amount = currentBatch.requestedWithFee;
-            unbondHistory[currentBatch.id].appliedExchangeRate = state.exchangeRate;
-            unbondHistory[currentBatch.id].withdrawRate = state.exchangeRate;
-            unbondHistory[currentBatch.id].released = false;
+        if ((block.timestamp - state.lastUnfrozenTime) > parameters.epochPeriod) {
+            uint256 unfreezeAmount = Math.mulDiv(currentBatch.requestedWithFee, state.exchangeRate, 1e18);
+            state.totalFreezeAmount -= unfreezeAmount;
+            unfreezeHistory[currentBatch.id].batchId = currentBatch.id;
+            unfreezeHistory[currentBatch.id].time = block.timestamp;
+            unfreezeHistory[currentBatch.id].amount = currentBatch.requestedWithFee;
+            unfreezeHistory[currentBatch.id].appliedExchangeRate = state.exchangeRate;
+            unfreezeHistory[currentBatch.id].withdrawRate = state.exchangeRate;
+            unfreezeHistory[currentBatch.id].released = false;
 
             currentBatch.id += 1;
             currentBatch.requestedWithFee = 0;
-            state.lastUnbondedTime = block.timestamp;
+            state.lastUnfrozenTime = block.timestamp;
 
-            unfreezebalancev2(unbondAmount, 1);
+            unfreezebalancev2(unfreezeAmount, 1);
         }
         ERC20Burnable(config.tokenContract).burnFrom(onBehalfOf, amount);
 
         emit Burned(onBehalfOf, amount, amountWithFee);
     }
 
-    function unbond(uint256 amount) external {
-        executeUnbond(amount, msg.sender);
+    function unfreeze_(uint256 amount) external {
+        _executeUnfreeze(amount, msg.sender);
     }
 
-    function withdrawUnbonded() external {
+    function withdrawUnfrozen() external {
         uint256 hubBalance = address(this).balance;
-        processWithdrawRate(block.timestamp - parameters.unbondingPeriod, hubBalance);
-        uint256 payout = withdrawableAmount(msg.sender, block.timestamp - parameters.unbondingPeriod);
+        _processWithdrawRate(block.timestamp - parameters.unfrozenPeriod, hubBalance);
+        uint256 payout = withdrawableAmount(msg.sender, block.timestamp - parameters.unfrozenPeriod);
         require(payout > 0);
         _clearReleasedEntries(msg.sender);
         state.prevHubBalance = hubBalance - payout;
@@ -182,13 +182,13 @@ contract Hub {
         emit ValidatorDeregistered(validator);
     }
 
-    function updateParams(uint256 _epochPeriod, uint256 _unbondingPeriod, uint256 _pegRecoveryFee,
+    function updateParams(uint256 _epochPeriod, uint256 _unfreezingPeriod, uint256 __pegRecoveryFee,
     uint256 _erThreshold) external {
         require(msg.sender == config.owner, "");
 
         parameters.epochPeriod = _epochPeriod;
-        parameters.unbondingPeriod = _unbondingPeriod;
-        parameters.pegRecoveryFee = _pegRecoveryFee;
+        parameters.unfrozenPeriod = _unfreezingPeriod;
+        parameters.pegRecoveryFee = __pegRecoveryFee;
         parameters.erThreshold = _erThreshold;
 
         emit ParamsUpdated();
@@ -206,7 +206,7 @@ contract Hub {
 
     struct Parameters {
         uint256 epochPeriod; // recommended 2 days
-        uint256 unbondingPeriod; // 14 days
+        uint256 unfrozenPeriod; // 14 days
         uint256 pegRecoveryFee; // decimal
         uint256 erThreshold; // decimal
         address rewardToken; // usdt
@@ -214,11 +214,11 @@ contract Hub {
 
     struct State {
         uint256 exchangeRate; // decimal
-        uint256 totalBondAmount;
+        uint256 totalFreezeAmount;
         uint256 lastIndexModification;
         uint256 prevHubBalance;
-        int256 actualUnbondedAmount;
-        uint256 lastUnbondedTime;
+        int256 actualUnfrozenAmount;
+        uint256 lastUnfrozenTime;
         uint64 lastProcessedBatch;
     }
 
@@ -230,9 +230,9 @@ contract Hub {
     mapping(address => bool) public validatorWhitelist;
     uint256 public whiteListCount;
 
-    mapping(address => mapping(uint64 => uint256)) public unbondWaitList;
+    mapping(address => mapping(uint64 => uint256)) public unfreezeWaitList;
 
-    struct UnbondHistory {
+    struct UnfreezeHistory {
         uint64 batchId;
         uint256 time;
         uint256 amount;
@@ -241,19 +241,19 @@ contract Hub {
         bool released;
     }
 
-    mapping(uint64 => UnbondHistory) public unbondHistory;
+    mapping(uint64 => UnfreezeHistory) public unfreezeHistory;
 
-    function recomputeExchangeRate(uint256 newTotalIssued, uint256 requestedWithFee) internal {
+    function _recomputeExchangeRate(uint256 newTotalIssued, uint256 requestedWithFee) internal {
         uint256 actualSupply = newTotalIssued + requestedWithFee;
 
-        if (state.totalBondAmount == 0 || actualSupply == 0) {
+        if (state.totalFreezeAmount == 0 || actualSupply == 0) {
             state.exchangeRate = 1e18;
         } else {
-            state.exchangeRate = (state.totalBondAmount * 1e18) / actualSupply;
+            state.exchangeRate = (state.totalFreezeAmount * 1e18) / actualSupply;
         }
     }
 
-    function pegRecoveryFee(uint256 requestedAmount, int256 deficit) internal view returns(uint256) {
+    function _pegRecoveryFee(uint256 requestedAmount, int256 deficit) internal view returns(uint256) {
         if (state.exchangeRate >= parameters.erThreshold) {
             return 0;
         }
@@ -266,16 +266,16 @@ contract Hub {
         return actualFee;
     }
 
-    function processWithdrawRate(uint256 historicalTime, uint256 hubBalance) internal {
+    function _processWithdrawRate(uint256 historicalTime, uint256 hubBalance) internal {
         int256 balanceDelta = int256(hubBalance) - int256(state.prevHubBalance);
-        state.actualUnbondedAmount += balanceDelta;
+        state.actualUnfrozenAmount += balanceDelta;
 
         uint256 totalExpected = 0;
         uint256 batchCount = 0;
         uint64 i = state.lastProcessedBatch + 1;
 
         while (true) {
-            UnbondHistory storage h = unbondHistory[i];
+            UnfreezeHistory storage h = unfreezeHistory[i];
             if (h.time == 0) break;
             if (h.time > historicalTime) break;
             if (h.released) break;
@@ -288,11 +288,11 @@ contract Hub {
         if (batchCount >= 1) {
             require(totalExpected > 0, "unexpected zero totalExpected");
 
-            int256 shortfall = int256(totalExpected) - state.actualUnbondedAmount;
+            int256 shortfall = int256(totalExpected) - state.actualUnfrozenAmount;
 
             uint64 j = state.lastProcessedBatch + 1;
             while (true) {
-                UnbondHistory storage h = unbondHistory[j];
+                UnfreezeHistory storage h = unfreezeHistory[j];
                 if (h.time == 0) break;
                 if (h.time > historicalTime) break;
                 if (h.released) break;
@@ -311,16 +311,16 @@ contract Hub {
             }
         }
 
-        state.actualUnbondedAmount = 0;
+        state.actualUnfrozenAmount = 0;
     }
 
     mapping(address => uint64[]) public userBatchIds;
 
-    function _recordUnbondEntry(address user, uint64 batchId, uint256 amount) internal {
-        if (unbondWaitList[user][batchId] == 0) {
+    function _recordUnfreezeEntry(address user, uint64 batchId, uint256 amount) internal {
+        if (unfreezeWaitList[user][batchId] == 0) {
             userBatchIds[user].push(batchId);
         }
-        unbondWaitList[user][batchId] += amount;
+        unfreezeWaitList[user][batchId] += amount;
     }
 
     function _clearReleasedEntries(address user) internal {
@@ -330,8 +330,8 @@ contract Hub {
         while (i < batchIds.length) {
             uint64 batchId = batchIds[i];
 
-            if (unbondHistory[batchId].released) {
-                unbondWaitList[user][batchId] = 0;
+            if (unfreezeHistory[batchId].released) {
+                unfreezeWaitList[user][batchId] = 0;
                 batchIds[i] = batchIds[batchIds.length - 1];
                 batchIds.pop();
             } else {
@@ -346,10 +346,10 @@ contract Hub {
 
         for (uint256 i = 0; i < batchIds.length; i++) {
             uint64 batchId = batchIds[i];
-            uint256 amt = unbondWaitList[user][batchId];
+            uint256 amt = unfreezeWaitList[user][batchId];
             if (amt == 0) continue;
 
-            UnbondHistory storage h = unbondHistory[batchId];
+            UnfreezeHistory storage h = unfreezeHistory[batchId];
 
             if (h.released || h.time < asOf) {
                 total += Math.mulDiv(amt, h.withdrawRate, 1e18);
