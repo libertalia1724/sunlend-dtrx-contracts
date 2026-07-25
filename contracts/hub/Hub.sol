@@ -7,6 +7,8 @@ import {ERC20Burnable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC2
 
 import {IToken} from "./IToken.sol";
 import {IReward} from "./IReward.sol";
+import {IThirdPartyAirdrop} from "./IThirdPartyAirdrop.sol";
+import {ISwapContract} from "./ISwapContract.sol";
 
 contract Hub {
     Config public config;
@@ -23,12 +25,16 @@ contract Hub {
     event ValidatorDeregistered(address indexed validator);
     event ParamsUpdated();
     event ConfigUpdated();
+    event AirdropTokenSwapped();
 
     struct Config {
         address owner;
         address rewardContract;
         address tokenContract;
+        address airdropContract;
     }
+
+    address private pool;
 
     constructor(uint256 _epochPeriod, uint256 _unfreezingPeriod, uint256 __pegRecoveryFee, uint256 _erThreshold,
     address _rewardToken, address validator) payable {
@@ -194,12 +200,14 @@ contract Hub {
         emit ParamsUpdated();
     }
 
-    function updateConfig(address _owner, address _rewardContract, address _tokenContract) external {
+    function updateConfig(address _owner, address _rewardContract, address _tokenContract,
+    address _airdropContract) external {
         require(msg.sender == config.owner, "");
 
         config.owner = _owner;
         config.rewardContract = _rewardContract;
         config.tokenContract = _tokenContract;
+        config.airdropContract = _airdropContract;
 
         emit ConfigUpdated();
     }
@@ -356,6 +364,49 @@ contract Hub {
             }
         }
         return total;
+    }
+
+    function claimAirdrop(address airdropTokenContract, address airdropContract, address airdropSwapContract,
+    uint8 stage, uint256 amount, bytes32[] calldata proof, uint256 maxSlippage, address to) external {
+        require(msg.sender == config.airdropContract, "");
+
+        IThirdPartyAirdrop(airdropContract).claim(stage, amount, proof);
+        _swapHook(airdropTokenContract, airdropSwapContract, maxSlippage, to);
+    }
+
+    // TODO: add max slippage calc
+    function _swapHook(address airdropTokenContract, address airdropSwapContract, uint256 maxSlippage, address to) internal {
+        require(IERC20(airdropTokenContract).balanceOf(address(this)) > 0, "");
+
+        pool = airdropSwapContract;
+        bool zeroForOne = (airdropTokenContract == ISwapContract(pool).token0());
+
+        (int256 amount0, int256 amount1) = ISwapContract(pool).swap(
+            address(this),
+            zeroForOne,
+            int256(IERC20(airdropTokenContract).balanceOf(address(this))),
+            zeroForOne
+                ? 4295128740
+                : 1461446703485210103287273052203988822378723970341,
+            abi.encode(airdropTokenContract)
+        );
+
+        uint256 amountOut = zeroForOne ? uint256(-amount1) : uint256(-amount0);
+
+        if (zeroForOne) {
+            IERC20(ISwapContract(pool).token1()).transfer(to, amountOut);
+        } else {
+            IERC20(ISwapContract(pool).token0()).transfer(to, amountOut);
+        }
+
+        emit AirdropTokenSwapped();
+    }
+
+    function sunswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external {
+        require(msg.sender == pool, "");
+        address tokenIn = abi.decode(data, (address));
+        uint256 amountToPay = amount0Delta > 0 ? uint256(amount0Delta) : uint256(amount1Delta);
+        IERC20(tokenIn).transfer(msg.sender, amountToPay);
     }
 
     receive() external payable {}

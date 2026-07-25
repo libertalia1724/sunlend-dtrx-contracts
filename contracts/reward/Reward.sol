@@ -9,7 +9,7 @@ import {ISunSwapRouter} from "./ISunSwapRouter.sol";
 
 contract Reward {
     address constant WTRX = 0x891cdb91d149f23B1a45D9c5Ca78a88d0cB44C18;
-    address constant USDT = 0xa614f803B6FD780986A42c78Ec9c7f77e6DeD13C;
+    // address constant USDT = 0xa614f803B6FD780986A42c78Ec9c7f77e6DeD13C;
 
     event Swap();
     event GlobalIndexUpdated();
@@ -84,13 +84,14 @@ contract Reward {
         IERC20(WTRX).approve(address(config.sunswapSmartRouter), type(uint256).max);
     }
 
+    // add max slippage calc
     function swapToRewardToken() payable external {
         require(msg.sender == config.hubContract, "");
 
         IWTRX(WTRX).deposit{value: address(this).balance}();
         address[] memory path = new address[](2);
         path[0] = WTRX;
-        path[1] = USDT;
+        path[1] = config.rewardToken;
         string[] memory poolVersion = new string[](1);
         poolVersion[0] = "v3";
         uint256[] memory versionLen = new uint256[](1);
