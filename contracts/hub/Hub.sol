@@ -36,6 +36,9 @@ contract Hub {
 
     address private pool;
 
+    address[] public srList;
+    uint256[] public tpList;
+
     constructor(uint256 _epochPeriod, uint256 _unfreezingPeriod, uint256 __pegRecoveryFee, uint256 _erThreshold,
     address _rewardToken, address validator) payable {
         require(msg.value > 0, "");
@@ -60,17 +63,21 @@ contract Hub {
         validatorWhitelist[validator] = true;
         whiteListCount = 1;
         freezebalancev2(msg.value, 1);
-        address[] memory srList = new address[](1);
-        srList[0] = validator;
-        uint256[] memory tpList = new uint256[](1);
-        tpList[0] = msg.value;
-        vote(srList, tpList);
+        address[] memory _srList = new address[](1);
+        _srList[0] = validator;
+        uint256[] memory _tpList = new uint256[](1);
+        _tpList[0] = msg.value;
+        vote(_srList, _tpList);
+        srList = _srList;
+        tpList = _tpList;
 
         emit ValidatorRegistered(validator);
         emit Frozen(msg.value);
     }
 
-    function freeze_(address validator) payable external {
+    function freeze_(uint256 validatorIndex, address expectedValidator) payable external {
+        address validator = srList[validatorIndex];
+        require(srList[validatorIndex] == expectedValidator, "");
         require(validatorWhitelist[validator] == true, "");
         require(msg.value > 0, "");
 
@@ -91,10 +98,7 @@ contract Hub {
         _recomputeExchangeRate(totalIssued, currentBatch.requestedWithFee);
 
         freezebalancev2(msg.value, 1);
-        address[] memory srList = new address[](1);
-        srList[0] = validator;
-        uint256[] memory tpList = new uint256[](1);
-        tpList[0] = msg.value;
+        tpList[validatorIndex] += msg.value;
         vote(srList, tpList);
 
         IToken(config.tokenContract).mint(msg.sender, mintAmountWithFee);
@@ -140,6 +144,7 @@ contract Hub {
     }
 
     function withdrawUnfrozen() external {
+        withdrawexpireunfreeze();
         uint256 hubBalance = address(this).balance;
         _processWithdrawRate(block.timestamp - parameters.unfrozenPeriod, hubBalance);
         uint256 payout = withdrawableAmount(msg.sender, block.timestamp - parameters.unfrozenPeriod);
@@ -169,21 +174,33 @@ contract Hub {
 
     function registerValidator(address validator) external {
         require(msg.sender == config.owner, "");
+        require(!validatorWhitelist[validator], "");
         require(isSrCandidate(validator), "");
 
         validatorWhitelist[validator] = true;
         whiteListCount += 1;
+        srList.push(validator);
+        tpList.push(0);
 
         emit ValidatorRegistered(validator);
     }
 
-    function deregisterValidator(address validator) external {
+    function deregisterValidator(uint256 validatorIndex) external {
+        address validator = srList[validatorIndex];
         require(msg.sender == config.owner, "");
         require(validatorWhitelist[validator] == true, "");
         require(whiteListCount > 1, "");
 
         validatorWhitelist[validator] = false;
         whiteListCount -= 1;
+        srList[validatorIndex] = srList[srList.length - 1];
+        srList.pop();
+        uint256 validatorTp = tpList[validatorIndex];
+        tpList[validatorIndex] = tpList[tpList.length - 1];
+        tpList.pop();
+        // TODO: it is a placeholder dangerious fix this
+        tpList[0] += validatorTp;
+        vote(srList, tpList);
 
         emit ValidatorDeregistered(validator);
     }

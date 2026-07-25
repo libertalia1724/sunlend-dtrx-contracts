@@ -81,6 +81,7 @@ contract Airdrop {
         require(airdropInfo[_token].airdropTokenContract != address(0), "");
         require(_index < config.airdropTokens.length, "");
 
+        delete airdropInfo[_token];
         config.airdropTokens[_index] = config.airdropTokens[config.airdropTokens.length - 1];
         config.airdropTokens.pop();
 
