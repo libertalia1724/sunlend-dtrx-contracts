@@ -1,22 +1,22 @@
 {
-  "name": "sunlend-dtrx-contracts",
+  "name": "sunlend-ftrx-contracts",
   "version": "1.0.0",
-  "description": "Solidity implementation of the Sunlend dTRX contracts",
+  "description": "Solidity implementation of the Sunlend fTRX contracts",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sunlend/sunlend-dtrx-contracts.git"
+    "url": "git+https://github.com/sunlend/sunlend-ftrx-contracts.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/sunlend/sunlend-dtrx-contracts/issues"
+    "url": "https://github.com/sunlend/sunlend-ftrx-contracts/issues"
   },
-  "homepage": "https://github.com/sunlend/sunlend-dtrx-contracts#readme",
+  "homepage": "https://github.com/sunlend/sunlend-ftrx-contracts#readme",
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.1.0",
     "@nomicfoundation/hardhat-ethers": "^3.1.0",

@@ -1,3 +1,3 @@
-# sunlend-dTRX-contracts
+# sunlend-fTRX-contracts
 
-Solidity implementation of the Sunlend dTRX contracts
+Solidity implementation of the Sunlend fTRX contracts
