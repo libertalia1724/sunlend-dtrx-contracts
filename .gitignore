@@ -13,6 +13,7 @@ cache-tron
 deploy
 scripts.md
 deployments
-.vscode
-tronbox-readme.md
+.vscode/tron-solc
+.vscode/settings.json
+.tronbox-project.md
 build

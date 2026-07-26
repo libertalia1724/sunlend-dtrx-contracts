@@ -18,7 +18,7 @@ module.exports = {
     networks: {
 
         mainnet: {
-            privateKey: process.env.NILE_PRIVATE_KEY,
+            privateKey: process.env.PRIVATE_KEY_MAINNET,
             userFeePercentage: 50,
             feeLimit: 1000 * 1e6,
             fullHost: "https://api.trongrid.io",
@@ -26,7 +26,7 @@ module.exports = {
         },
 
         nile: {
-            privateKey: process.env.NILE_PRIVATE_KEY,
+            privateKey: process.env.PRIVATE_KEY_NILE,
             userFeePercentage: 50,
             feeLimit: 1000 * 1e6,
             fullHost: "https://nile.trongrid.io",
@@ -34,7 +34,7 @@ module.exports = {
         },
 
         shasta: {
-            privateKey: process.env.NILE_PRIVATE_KEY,
+            privateKey: process.env.PRIVATE_KEY_SHASTA,
             userFeePercentage: 50,
             feeLimit: 1000 * 1e6,
             fullHost: "https://api.shasta.trongrid.io",

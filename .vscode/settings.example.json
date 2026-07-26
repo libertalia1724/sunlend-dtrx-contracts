@@ -1,0 +1,4 @@
+{
+  "solidity.compileUsingLocalVersion": "YOUR LOCAL PATH",
+  "solidity.defaultCompiler": "localFile"
+}
