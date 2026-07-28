@@ -18,7 +18,6 @@ contract Airdrop {
         address airdropTokenContract;
         address airdropContract;
         address airdropSwapContract;
-        uint256 maxSlippage;
     }
 
     Config public config;
@@ -48,7 +47,7 @@ contract Airdrop {
     }
 
     function addAirdropInfo(string memory _airdropToken, address _airdropTokenContract, address _airdropContract,
-    address _airdropSwapContract, uint256 _maxSlippage) external {
+    address _airdropSwapContract) external {
         require(msg.sender == config.owner, "");
         require(airdropInfo[_airdropToken].airdropTokenContract == address(0), "");
 
@@ -56,20 +55,18 @@ contract Airdrop {
         airdropInfo[_airdropToken].airdropTokenContract = _airdropTokenContract;
         airdropInfo[_airdropToken].airdropContract = _airdropContract;
         airdropInfo[_airdropToken].airdropSwapContract = _airdropSwapContract;
-        airdropInfo[_airdropToken].maxSlippage = _maxSlippage;
 
         emit AirdropInfoAdded();
     }
 
     function updateAirdropInfo(string memory _airdropToken, address _airdropTokenContract, address _airdropContract,
-    address _airdropSwapContract, uint256 _maxSlippage) external {
+    address _airdropSwapContract) external {
         require(msg.sender == config.owner, "");
         require(airdropInfo[_airdropToken].airdropTokenContract != address(0), "");
 
         airdropInfo[_airdropToken].airdropTokenContract = _airdropTokenContract;
         airdropInfo[_airdropToken].airdropContract = _airdropContract;
         airdropInfo[_airdropToken].airdropSwapContract = _airdropSwapContract;
-        airdropInfo[_airdropToken].maxSlippage = _maxSlippage;
 
         emit AirdropInfoUpdated();
     }
@@ -79,7 +76,6 @@ contract Airdrop {
         require(msg.sender == config.owner, "");
         string memory _token = config.airdropTokens[_index];
         require(airdropInfo[_token].airdropTokenContract != address(0), "");
-        require(_index < config.airdropTokens.length, "");
 
         delete airdropInfo[_token];
         config.airdropTokens[_index] = config.airdropTokens[config.airdropTokens.length - 1];
@@ -88,7 +84,8 @@ contract Airdrop {
         emit AirdropRemoved();
     }
 
-    function fabricateClaim(string memory airdropToken, uint8 stage, uint256 amount, bytes32[] calldata proof) external {
+    function fabricateClaim(string memory airdropToken, uint8 stage, uint256 amount, bytes32[] calldata proof,
+    uint256 minAmountOut) external {
         require(airdropInfo[airdropToken].airdropTokenContract != address(0), "");
 
         IHub(config.hubContract).claimAirdrop(airdropInfo[airdropToken].airdropTokenContract,
@@ -97,7 +94,7 @@ contract Airdrop {
         stage,
         amount,
         proof,
-        airdropInfo[airdropToken].maxSlippage,
+        minAmountOut,
         config.rewardContract);
 
         emit ClaimFabricated();

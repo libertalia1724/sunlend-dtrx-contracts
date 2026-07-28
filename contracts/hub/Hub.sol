@@ -404,15 +404,14 @@ contract Hub {
     }
 
     function claimAirdrop(address airdropTokenContract, address airdropContract, address airdropSwapContract,
-    uint8 stage, uint256 amount, bytes32[] calldata proof, uint256 maxSlippage, address to) external {
+    uint8 stage, uint256 amount, bytes32[] calldata proof, uint256 minAmountOut, address to) external {
         require(msg.sender == config.airdropContract, "");
 
         IThirdPartyAirdrop(airdropContract).claim(stage, amount, proof);
-        _swapHook(airdropTokenContract, airdropSwapContract, maxSlippage, to);
+        _swapHook(airdropTokenContract, airdropSwapContract, minAmountOut, to);
     }
 
-    // TODO: add max slippage calc
-    function _swapHook(address airdropTokenContract, address airdropSwapContract, uint256 maxSlippage, address to) internal {
+    function _swapHook(address airdropTokenContract, address airdropSwapContract, uint256 minAmountOut, address to) internal {
         require(IERC20(airdropTokenContract).balanceOf(address(this)) > 0, "");
 
         pool = airdropSwapContract;
@@ -430,6 +429,8 @@ contract Hub {
 
         uint256 amountOut = zeroForOne ? uint256(-amount1) : uint256(-amount0);
 
+        require(amountOut >= minAmountOut, "slippage too high");
+
         if (zeroForOne) {
             IERC20(ISwapContract(pool).token1()).transfer(to, amountOut);
         } else {
@@ -439,7 +440,7 @@ contract Hub {
         emit AirdropTokenSwapped();
     }
 
-    function sunswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external {
+    function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external {
         require(msg.sender == pool, "");
         address tokenIn = abi.decode(data, (address));
         uint256 amountToPay = amount0Delta > 0 ? uint256(amount0Delta) : uint256(amount1Delta);
